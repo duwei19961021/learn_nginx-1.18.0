@@ -18,8 +18,8 @@ typedef void *            ngx_buf_tag_t;
 typedef struct ngx_buf_s  ngx_buf_t;
 
 struct ngx_buf_s {
-    u_char          *pos;
-    u_char          *last;
+    u_char          *pos;           /* 待处理数据的开始标记  */
+    u_char          *last;          /* 待处理数据的结尾标记 */
     off_t            file_pos;
     off_t            file_last;
 
@@ -31,7 +31,7 @@ struct ngx_buf_s {
 
 
     /* the buf's content could be changed */
-    unsigned         temporary:1;
+    unsigned         temporary:1;   /* 标志位，为1时，内存可修改 */
 
     /*
      * the buf's content is in a memory cache or in a read only memory

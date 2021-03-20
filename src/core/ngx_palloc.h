@@ -68,21 +68,40 @@ typedef struct {
     ngx_log_t            *log;
 } ngx_pool_cleanup_file_t;
 
-
+// 创建内存池结点
 ngx_pool_t *ngx_create_pool(size_t size, ngx_log_t *log);
+
+// 销毁内存池结点
 void ngx_destroy_pool(ngx_pool_t *pool);
+
+// 清理内存池结点
 void ngx_reset_pool(ngx_pool_t *pool);
 
+// 向内存池申请内存的函数
 void *ngx_palloc(ngx_pool_t *pool, size_t size);
+
+// 开辟内存的函数，根据size去调用不同的函数
 void *ngx_pnalloc(ngx_pool_t *pool, size_t size);
+
+//申请一块内存并初始化为0值
 void *ngx_pcalloc(ngx_pool_t *pool, size_t size);
+
 void *ngx_pmemalign(ngx_pool_t *pool, size_t size, size_t alignment);
+
+// 释放large链表上的内存p
 ngx_int_t ngx_pfree(ngx_pool_t *pool, void *p);
 
-
+// cleanup机制设计的比较灵活，pool->cleanup是一个链表，每个ngx_pool_cleanup_t的数据结构上保存这指向的内存地址和回调清理函数，
+// 通过这个机制可以很方便的管理一些特殊的内存类型，比如文件描述符、自定义类型。
 ngx_pool_cleanup_t *ngx_pool_cleanup_add(ngx_pool_t *p, size_t size);
+
+// 清理cleanup链表上的文件描述符fd，时间复杂度O(n)，链表过长时效率偏低
 void ngx_pool_run_cleanup_file(ngx_pool_t *p, ngx_fd_t fd);
+
+// 关闭文件回调函数
 void ngx_pool_cleanup_file(void *data);
+
+// 删除文件回调函数
 void ngx_pool_delete_file(void *data);
 
 

@@ -15,8 +15,8 @@ ngx_create_temp_buf(ngx_pool_t *pool, size_t size)
 {
     ngx_buf_t *b;       // typedef struct ngx_buf_s  ngx_buf_t
 
-    // #define ngx_calloc_buf(pool) ngx_pcalloc(pool, sizeof(ngx_buf_t))
-    // 在内存池上开辟内存，这里只是给ngx_buf_t的描述结构体开辟空间，这个函数没找到原型，应该是在缓冲链表上
+    // #define ngx_calloc_buf(pool) ngx_pcalloc(pool, sizeof(ngx_buf_t))，调用的ngx_palloc且初始化为0值
+    // 在内存池上开辟内存，这里只是给ngx_buf_t的描述结构体开辟空间
     b = ngx_calloc_buf(pool);
     if (b == NULL) {
         return NULL;

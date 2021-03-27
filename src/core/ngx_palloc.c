@@ -23,29 +23,29 @@ ngx_create_pool(size_t size, ngx_log_t *log)
     p = ngx_memalign(NGX_POOL_ALIGNMENT, size, log);
     /*
         #define ngx_memalign(alignment, size, log)  ngx_alloc(size, log)，
-        而ngx_alloc实际上是去调用malloc
+        而ngx_alloc实际上是去调用malloc(没有其它的特殊处理)
     */
 
     if (p == NULL) {
         return NULL;
     }
 
-    p->d.last = (u_char *) p + sizeof(ngx_pool_t);
+    p->d.last = (u_char *) p + sizeof(ngx_pool_t); // 在父结点上last指向ngx_log_t之后的位置
     /*
         p是申请得到的内存的首地址，前sizeof(ngx_pool_t)字节的内存要留给内存池的管理结构(我也叫他控制中心)，
-        控制中心之后的内存是给申请者使用的。last是申请者能够使用内存的起始位置，end是结束位置(由数据结构得知)
+        子结点控制中心之后的内存是给申请者使用的。last是申请者能够使用内存的起始位置，end是结束位置(由数据结构得知)
     */
 
     p->d.end = (u_char *) p + size;
     /*
         end指向申请得到的内存的末尾位置，
         p是首地址，加上size就是结束地址即end的指向位置，
-        内存的申请者总共申请了size个字节的内存，能够使用的内存为：size - sizeof(ngx_pool_t)
+        内存的申请者总共申请了size个字节的内存，子结点能够使用的内存为：size - sizeof(ngx_pool_t)
     */
 
     p->d.next = NULL;
     /*
-        内存池通过指针相连，组成一个链表，下一个结点在创建时应当指向NULL
+        内存池通过指针相连，组成一个链表
     */
 
     p->d.failed = 0;
@@ -59,18 +59,21 @@ ngx_create_pool(size_t size, ngx_log_t *log)
    max取size和操作系统弄内存页二者中较小的值
    */
 
-    p->current = p;
+    p->current = p; // 创建父节点时，current会指向自己，创建的是子结点时
     p->chain = NULL;
     p->large = NULL;
     p->cleanup = NULL;
     p->log = log;
     /*
-        只有缓存池的父节点，才会用到这几个成员  ，子节点只挂载在p->d.next,并且只负责p->d的数据内容
+        只有缓存池的父节点，才会用到这几个成员  ，子结点只挂载在p->d.next,并且只负责p->d的数据内容
+        子结点没有不适用这几个成员，在创建子结点时last指向ngx_pool_data_t后的位置，之后的所有
+        空间都是给数数据的
     */
 
     return p;
 }
 
+// 销毁整个内存池
 void
 ngx_destroy_pool(ngx_pool_t *pool)
 {
@@ -128,7 +131,7 @@ ngx_destroy_pool(ngx_pool_t *pool)
     for (p = pool, n = pool->d.next; /* void */; p = n, n = n->d.next) {
         ngx_free(p);
         /*
-            至此，父结点上的large链表以及cleanup链表都被清理了，然后循环清理内存池结点，
+            至此，父结点上的large链表以及cleanup链表都被清理了，然后循环清理内存池子结点，
             小块数据内存是分配在内存池结点上的，和其控制中心(ngx_pool_t)是连续的，
             释放时直接释放当前结点就行了
         */
@@ -156,7 +159,7 @@ ngx_reset_pool(ngx_pool_t *pool)
         }
     }
     /*
-        清理large链表
+        清理large链表的数据区
     */
 
     for (p = pool; p; p = p->d.next) {
@@ -180,7 +183,8 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
 {
 #if !(NGX_DEBUG_PALLOC)
     /*
-        这里是个条件编译，如果没开启ngx palloc debug就会根据size决定调用ngx_palloc_small还是   					   	ngx_palloc_large，如果开启了debug则一律调用ngx_palloc_large
+        这里是个条件编译，如果没开启ngx palloc debug就会根据size决定调用ngx_palloc_small还是
+        ngx_palloc_large，如果开启了debug则一律调用ngx_palloc_large
     */
 
     if (size <= pool->max) {
@@ -222,7 +226,9 @@ ngx_palloc_small(ngx_pool_t *pool, size_t size, ngx_uint_t align)
             m = ngx_align_ptr(m, NGX_ALIGNMENT);
         }
         /*
-            align，暂时不懂是啥意思
+            内存对其，是分配出去的m指向的内存地址是NGX_ALIGNMENT的整数倍，
+            如果不进行内存对其，则在内存池结点的小块数据区上分配的内存都是连续的，
+            对齐能避免cpu读取一块内存时需要读取两次(空间换时间)
         */
 
         if ((size_t) (p->d.end - m) >= size) {
@@ -236,6 +242,9 @@ ngx_palloc_small(ngx_pool_t *pool, size_t size, ngx_uint_t align)
         */
 
         p = p->d.next;
+        /*
+            否则就继续遍历下一个结点
+        */
 
     } while (p);
 
@@ -261,7 +270,7 @@ ngx_palloc_block(ngx_pool_t *pool, size_t size)
 
     m = ngx_memalign(NGX_POOL_ALIGNMENT, psize, pool->log);
     /*
-        申请psize大小的内存块
+        调用malloc申请psize大小的内存块
     */
 
     if (m == NULL) {
@@ -289,25 +298,32 @@ ngx_palloc_block(ngx_pool_t *pool, size_t size)
     /*
         前sizeof(ngx_pool_data_t)个字节留给ngx_pool_data_t结构使用，
         这里用的比较巧妙，细品细品，此时有点惊叹设计者的做法。
-        因为创建的是子节点，所以max、current指针、缓冲区链表指针、large链表指针、
-        cleanup链表指针，这几个成员所占的内存都可以分配出去给调用者使用(子结点用不到这几个成员)，
+        因为创建的是子结点，max、current指针、缓冲区链表指针、large链表指针、
+        cleanup链表指针都用不到，这几个成员所占的内存都可以分配出去给调用者使用(子结点用不到这几个成员)，
         避免了空间浪费。
     */
 
     m = ngx_align_ptr(m, NGX_ALIGNMENT);
+    /*
+        内存对齐
+     */
     new->d.last = m + size;
     /*
         移动last size个字节，标识这段内存已经被分配出去了
     */
 
+    // 重点部分
     for (p = pool->current; p->d.next; p = p->d.next) {
         if (p->d.failed++ > 4) {
             pool->current = p->d.next;
         }
     }
     /*
-        每遍历一个结点failed++，当failed超过了4时，current会指向新子结点，
-        这么做可以避免遍历整个链表(如果链表足够长，遍历一次效率比较低)
+        创建内存池时current指向父结点自己。举个例子：每次查找链表寻找合适的结点时都是从current指向的结点开始查找，
+        能走到这个逻辑，说明当前要分配的size current之后的结点时无法满足的，因此才会走到当前结点扩容的逻辑，每
+        扩容一次将current开始之后的结点failed字段+1，如果从current指向的结点开始寻找内存导致发生扩容的次数超过了
+        四次，则下一次查找不在从current指向的结点开始了(多次的分配失败就会放弃这个结点，认为这个结点的内存已经分配完了)，
+        而是将current指向下一个结点，下一次查找从下一个结点开始查找
     */
 
     p->d.next = new;
